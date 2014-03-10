@@ -1,0 +1,14 @@
+<appian-plugin name="Get Next Task Plugin"
+	key=""com.appiancorp.plugins.servlet.getnexttask">
+	<plugin-info>
+		<description>Plugin for distributing tasks to users
+		</description>
+		<vendor name="Appian Corporation" url="http://www.appian.com" />
+		<version>1.0</version>
+		<application-version min="7.4" />
+	</plugin-info>
+	<servlet name="GetNextTaskServlet" key="getNextHFTTaskt"
+		class="com.appiancorp.plugins.servlet.GetNextHFTTaskServlet">
+		<url-pattern>/getnexthfttask*</url-pattern>
+	</servlet>
+</appian-plugin>

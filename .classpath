@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="src/java"/>
+	<classpathentry kind="src" path="src/resources"/>
+	<classpathentry kind="lib" path="C:/Appian/appian73/ear/suite.ear/lib/appian-suiteapi.jar"/>
+	<classpathentry kind="lib" path="C:/Appian/appian73/ear/suite.ear/lib/appian-type.jar"/>
+	<classpathentry kind="lib" path="C:/Appian/appian73/ear/suite.ear/lib/appian-services.jar"/>
+	<classpathentry kind="lib" path="C:/Appian/appian73/ear/suite.ear/lib/appian-common.jar"/>
+	<classpathentry kind="lib" path="C:/Appian/appian73/ear/suite.ear/lib/log4j-1.2.15.jar"/>
+	<classpathentry kind="lib" path="lib-compile/servlet-api-2.5.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>
