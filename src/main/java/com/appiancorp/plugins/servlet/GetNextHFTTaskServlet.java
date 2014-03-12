@@ -1,27 +1,16 @@
 package com.appiancorp.plugins.servlet;
 
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.log4j.Logger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.appiancorp.ps.sail.expr.PortalReport2SAIL;
-import com.appiancorp.ps.sail.type.PortalReport;
-import com.appiancorp.ps.sail.type.PortalReportCell;
-import com.appiancorp.ps.sail.type.PortalReportColumn;
-import com.appiancorp.ps.sail.type.PortalReportColumnData;
-import com.appiancorp.ps.sail.type.PortalReportDataSubset;
 import com.appiancorp.ps.sail.type.PortalReportFilter;
 import com.appiancorp.services.ServiceContext;
 import com.appiancorp.services.WebServiceContextFactory;
@@ -32,19 +21,14 @@ import com.appiancorp.suiteapi.common.exceptions.InvalidOperationException;
 import com.appiancorp.suiteapi.common.exceptions.InvalidStateException;
 import com.appiancorp.suiteapi.common.exceptions.InvalidUserException;
 import com.appiancorp.suiteapi.common.exceptions.PrivilegeException;
-import com.appiancorp.suiteapi.common.paging.PagingInfo;
-import com.appiancorp.suiteapi.common.paging.SortInfo;
 import com.appiancorp.suiteapi.process.Assignment;
 import com.appiancorp.suiteapi.process.Assignment.Assignee;
 import com.appiancorp.suiteapi.process.ProcessDesignService;
 import com.appiancorp.suiteapi.process.ProcessExecutionService;
-import com.appiancorp.suiteapi.process.analytics2.Column;
-import com.appiancorp.suiteapi.process.analytics2.Filter;
 import com.appiancorp.suiteapi.process.analytics2.ProcessAnalyticsService;
 import com.appiancorp.suiteapi.process.analytics2.ProcessReport;
 import com.appiancorp.suiteapi.process.analytics2.ReportData;
 import com.appiancorp.suiteapi.process.analytics2.ReportResultPage;
-import com.appiancorp.suiteapi.process.analytics2.SimpleColumnFilter;
 import com.appiancorp.suiteapi.process.exceptions.InvalidActivityException;
 import com.appiancorp.suiteapi.process.exceptions.ReportComplexityException;
 import com.appiancorp.suiteapi.process.exceptions.ReportSizeException;
@@ -57,7 +41,7 @@ import com.appiancorp.suiteapi.type.TypedValue;
 import com.appiancorp.suiteapi.type.exceptions.InvalidTypeException;
 
 /**
- * Handled the notifications sent back from subscriptions
+ * Grab next available task in the HFT_GET_ALL_TASKS_LIST report
  *
  * @author michael.chirlin
  */
@@ -67,25 +51,21 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 	private static final Logger LOG = Logger.getLogger(GetNextHFTTaskServlet.class);
 
 	@Override
-	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException {
+	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 		handleRequest(request, response);
 	}
 
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response)
-			throws ServletException  {
+			throws ServletException, IOException  {
 		handleRequest(request, response);
 	}
 
-	private void handleRequest(HttpServletRequest request, HttpServletResponse response) {
+	private void handleRequest(HttpServletRequest request, HttpServletResponse response) throws IOException {
 		ServiceContext sc = WebServiceContextFactory.getServiceContext(request);
-		Long reportId = (Long)evaluateExpression(sc,"cons!TEST_GET_ALL_TASKS_LIST");
-
-		response.setContentType("text/html");
-		PrintWriter out = null; 
+		Long reportId = (Long)evaluateExpression(sc,"cons!HFT_GET_ALL_TASKS_LIST");
 
 		try {
-			out = response.getWriter();
 			Long[] taskIds = getPortalReportDataSubset(sc, reportId, request.getRemoteUser());
 			Long selectedTaskId = null;
 			for(Long taskId:taskIds) {
@@ -94,15 +74,13 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 					break;
 				}
 			}
-
-			response.sendRedirect("/suite/apps/test/testpage/task/" + String.valueOf(selectedTaskId));
+			if (selectedTaskId != null) {
+				response.sendRedirect("/suite/tempo/tasks/task/" + String.valueOf(selectedTaskId));
+			} else {
+				response.sendRedirect("/suite/tempo/tasks/assignedtome");
+			}
 		} catch (Exception e) {
-
-			out.println("<HTML>");
-			out.println("<HEAD><TITLE>Error</TITLE></HEAD>");
-			out.println("<BODY>");
-			out.println("Something went wrong");
-			out.println("</BODY></HTML>");
+			response.sendRedirect("/suite/tempo/tasks/assignedtome");
 		}
 	}
 
@@ -135,12 +113,12 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 		Assignee[] currentAssignees = pes.getAssigneePoolForTasks(taskIds);
 
 		for(Assignee assignee:currentAssignees) {
-			if(assignee.getType() == Assignment.ASSIGNEE_TYPE_GROUPS) {
-				Long currentAssignee = (Long)assignee.getValue();
+			// Currently considering any task assigned to a group available for reassignment
+			if(assignee.getType() != Assignment.ASSIGNEE_TYPE_GROUPS) {
+				/*Long currentAssignee = (Long)assignee.getValue();
 				Long groupId = (Long)evaluateExpression(sc, "group(cons!HFT_ALL_USERS, \"id\")");
 				if(currentAssignee.longValue() != groupId.longValue())
-					return false;
-			} else {
+					return false;*/
 				return false;
 			}
 		}
@@ -194,43 +172,29 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 		}
 	}
 
-	//private PortalReportDataSubset getPortalReportDataSubset(ServiceContext sc, Long reportId)
 	private Long[] getPortalReportDataSubset(ServiceContext sc, Long reportId, String user)
 			throws PrivilegeException, UnsupportedReportSpecificationException, ReportComplexityException, ReportSizeException, ExpressionException {
 
 		ProcessAnalyticsService pas = ServiceLocator.getProcessAnalyticsService2(sc);
 		PortalReport2SAIL p2s = new PortalReport2SAIL();
 		ProcessReport processReport = pas.getProcessReport(reportId);
-
-		Object memberOfPrivate = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!TEST_PRIVATE_GROUP)");
-		Object memberOfGroup = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!TEST_GROUP)");
-		String field = "7";
-		String compType = "IN";
-		Object value = (Object)new String[]{};
-		if((Long)memberOfPrivate == 1) {
-			value = (Object)new String[]{"Regular", "Private", "Associate"};
-		} else if((Long)memberOfGroup == 1) {
-			value = (Object)new String[]{"Regular"};
-		}
-
-		TypedValue tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
-
-		PortalReportFilter accessTypeFilter = new PortalReportFilter(field, compType, tv);
-		PortalReportFilter[] filters = {accessTypeFilter};
+		
+		PortalReportFilter[] filters = createFilters(sc, user);
 
 		ReportData reportData = p2s.getReportDataWithContext(sc, processReport, null, filters);
 
-		reportData.setStartIndex(0); // reports are zero based indexes
-		reportData.setBatchSize(25);
-		reportData.setSortColumnLocalId(2);
+		reportData.setStartIndex(0);
+		reportData.setBatchSize(25); 		// Can increase this if more than 25 people are clicking at the same time
+		reportData.setSortColumnLocalId(2); // Sorting by Column 3 (Received Date)
 		reportData.setSortOrder(Constants.SORT_ORDER_ASCENDING);
 
 		ReportResultPage rp = pas.getReportPageWithTypedValues(reportData);
 
 		return rp.getTaskIds();
 
-		/*
-		PortalReport pReport = new PortalReport();
+		/** For now not pulling back column data just task ids **/
+		
+	    /* PortalReport pReport = new PortalReport();
 		List<PortalReportColumn> columnList = new ArrayList<>();
 		List<PortalReportColumnData> dataList = new ArrayList<>();
 		List<Long> identifierList = new ArrayList<>();
@@ -277,6 +241,44 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 				identifierList,
 				pReport,
 				columnList
-				);*/
+				);
+	  */
+	}
+	
+	private PortalReportFilter[] createFilters(ServiceContext sc, String user) {
+		Object memberOfPrivate = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_PRIVATE_ASSOCIATE_GROUP)");
+		Object memberOfRegular = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_REGULAR_USERS_GROUP)");
+		Object memberOfSupervisor = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_SUPERVISORS_GROUP)");
+		Object memberOfUsers = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_USERS)");
+		
+		// Create Access Type Filter
+		
+		String field = "10";
+		String compType = "IN";
+		Object value = (Object)new String[]{};
+		if((Long)memberOfPrivate == 1) {
+			value = (Object)new String[]{"Regular", "Private", "Associate"};
+		} else if((Long)memberOfRegular == 1) {
+			value = (Object)new String[]{"Regular"};
+		}
+		TypedValue tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
+		PortalReportFilter accessTypeFilter = new PortalReportFilter(field, compType, tv);
+		
+		// Create Case Status Filter
+		
+		field = "14";
+		compType = "IN";
+		value = new String[]{};
+		if((Long)memberOfSupervisor == 1) {
+			value = (Object)new String[]{"PENDING SUPERVISOR REVIEW"};
+		} else if((Long)memberOfUsers == 1) {
+			value = (Object)new String[]{"NEW"};
+		}
+		tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
+		PortalReportFilter caseStatusFilter = new PortalReportFilter(field, compType, tv);
+		
+		PortalReportFilter[] filters = {accessTypeFilter, caseStatusFilter};
+		
+		return filters;
 	}
 }
