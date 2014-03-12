@@ -1,6 +1,9 @@
 package com.appiancorp.plugins.servlet;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -52,35 +55,53 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 
 	@Override
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-		handleRequest(request, response);
+		response.sendRedirect(calculateUrl(request, response));
 	}
 
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response)
 			throws ServletException, IOException  {
-		handleRequest(request, response);
+		response.sendRedirect(calculateUrl(request, response));
 	}
 
-	private void handleRequest(HttpServletRequest request, HttpServletResponse response) throws IOException {
+	private String calculateUrl(HttpServletRequest request, HttpServletResponse response) throws IOException {
 		ServiceContext sc = WebServiceContextFactory.getServiceContext(request);
 		Long reportId = (Long)evaluateExpression(sc,"cons!HFT_GET_ALL_TASKS_LIST");
 
 		try {
-			Long[] taskIds = getPortalReportDataSubset(sc, reportId, request.getRemoteUser());
-			Long selectedTaskId = null;
-			for(Long taskId:taskIds) {
-				if(assignTask(sc, taskId, request.getRemoteUser())) {
-					selectedTaskId = taskId;
-					break;
+			// Loop through various sorting filters 
+			
+			String[] accessTypes = calculateAccessTypes(
+					sc,
+					request.getRemoteUser(),
+					new String[]{"cons!HFT_PRIVATE_ASSOCIATE_GROUP", "cons!HFT_ASSOCIATE_USERS_GROUP", "cons!HFT_REGULAR_USERS_GROUP"},
+					new String[]{"Private", "Associate", "Regular"}
+			);
+			String[] heloTypes = {"HELON", "HELOC"};
+			String[] statusTypes = calculateAccessTypes(
+					sc,
+					request.getRemoteUser(),
+					new String[]{"cons!HFT_SUPERVISORS_GROUP", "cons!HFT_USERS"},
+					new String[]{"PENDING SUPERVISOR REVIEW", "NEW"}
+			);
+			
+			for(String accessType : accessTypes) {
+				for(String heloType : heloTypes) {
+					for(String statusType : statusTypes) {
+						PortalReportFilter[] filters = createFilters(sc, accessType, heloType, statusType);
+						
+						Long[] taskIds = getPortalReportDataSubset(sc, reportId, filters);
+						for(Long taskId:taskIds) {
+							if(assignTask(sc, taskId, request.getRemoteUser())) {
+								return("/suite/tempo/tasks/task/" + String.valueOf(taskId));
+							}
+						}
+					}
 				}
 			}
-			if (selectedTaskId != null) {
-				response.sendRedirect("/suite/tempo/tasks/task/" + String.valueOf(selectedTaskId));
-			} else {
-				response.sendRedirect("/suite/tempo/tasks/assignedtome");
-			}
+			return("/suite/tempo/tasks/assignedtome");
 		} catch (Exception e) {
-			response.sendRedirect("/suite/tempo/tasks/assignedtome");
+			return("/suite/tempo/tasks/assignedtome");
 		}
 	}
 
@@ -172,14 +193,12 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 		}
 	}
 
-	private Long[] getPortalReportDataSubset(ServiceContext sc, Long reportId, String user)
+	private Long[] getPortalReportDataSubset(ServiceContext sc, Long reportId, PortalReportFilter[] filters)
 			throws PrivilegeException, UnsupportedReportSpecificationException, ReportComplexityException, ReportSizeException, ExpressionException {
 
 		ProcessAnalyticsService pas = ServiceLocator.getProcessAnalyticsService2(sc);
 		PortalReport2SAIL p2s = new PortalReport2SAIL();
 		ProcessReport processReport = pas.getProcessReport(reportId);
-		
-		PortalReportFilter[] filters = createFilters(sc, user);
 
 		ReportData reportData = p2s.getReportDataWithContext(sc, processReport, null, filters);
 
@@ -245,40 +264,48 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 	  */
 	}
 	
-	private PortalReportFilter[] createFilters(ServiceContext sc, String user) {
-		Object memberOfPrivate = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_PRIVATE_ASSOCIATE_GROUP)");
-		Object memberOfRegular = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_REGULAR_USERS_GROUP)");
-		Object memberOfSupervisor = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_SUPERVISORS_GROUP)");
-		Object memberOfUsers = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), cons!HFT_USERS)");
-		
+	private PortalReportFilter[] createFilters(ServiceContext sc, String accessType, String heloType, String statusType) {
+
 		// Create Access Type Filter
 		
 		String field = "10";
 		String compType = "IN";
-		Object value = (Object)new String[]{};
-		if((Long)memberOfPrivate == 1) {
-			value = (Object)new String[]{"Regular", "Private", "Associate"};
-		} else if((Long)memberOfRegular == 1) {
-			value = (Object)new String[]{"Regular"};
-		}
+		Object value = accessType;
 		TypedValue tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
 		PortalReportFilter accessTypeFilter = new PortalReportFilter(field, compType, tv);
+		
+		// Create HELO Type Filter
+		
+		field = "10"; // Figure out which column has this field ***********************************************
+		compType = "IN";
+		value = heloType;
+		tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
+		PortalReportFilter heloTypeFilter = new PortalReportFilter(field, compType, tv);
 		
 		// Create Case Status Filter
 		
 		field = "14";
 		compType = "IN";
-		value = new String[]{};
-		if((Long)memberOfSupervisor == 1) {
-			value = (Object)new String[]{"PENDING SUPERVISOR REVIEW"};
-		} else if((Long)memberOfUsers == 1) {
-			value = (Object)new String[]{"NEW"};
-		}
+		value = statusType;
 		tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
 		PortalReportFilter caseStatusFilter = new PortalReportFilter(field, compType, tv);
 		
-		PortalReportFilter[] filters = {accessTypeFilter, caseStatusFilter};
+		PortalReportFilter[] filters = {accessTypeFilter, heloTypeFilter, caseStatusFilter};
 		
 		return filters;
+	}
+	
+	private String[] calculateAccessTypes(ServiceContext sc, String user, String[] groups, String[] types) {
+		
+		List<String> accessTypes = new ArrayList<String>();
+		
+		for(int i = 0; i < groups.length; i++) {
+			Object memberOfPrivate = evaluateExpression(sc, "fn!isusermemberofgroup(touser(\"" + user + "\"), " + groups[i] + ")");
+			if((Long)memberOfPrivate == 1) {
+				accessTypes.add(types[i]);
+			}
+		}
+		
+		return accessTypes.toArray(new String[]{});
 	}
 }
