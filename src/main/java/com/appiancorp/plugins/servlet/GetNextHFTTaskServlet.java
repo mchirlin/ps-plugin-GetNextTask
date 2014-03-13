@@ -2,6 +2,7 @@ package com.appiancorp.plugins.servlet;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 import javax.servlet.ServletException;
@@ -9,11 +10,16 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.log4j.Logger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.appiancorp.ps.sail.expr.PortalReport2SAIL;
+import com.appiancorp.ps.sail.type.PortalReport;
+import com.appiancorp.ps.sail.type.PortalReportCell;
+import com.appiancorp.ps.sail.type.PortalReportColumn;
+import com.appiancorp.ps.sail.type.PortalReportColumnData;
 import com.appiancorp.ps.sail.type.PortalReportFilter;
 import com.appiancorp.services.ServiceContext;
 import com.appiancorp.services.WebServiceContextFactory;
@@ -28,6 +34,7 @@ import com.appiancorp.suiteapi.process.Assignment;
 import com.appiancorp.suiteapi.process.Assignment.Assignee;
 import com.appiancorp.suiteapi.process.ProcessDesignService;
 import com.appiancorp.suiteapi.process.ProcessExecutionService;
+import com.appiancorp.suiteapi.process.analytics2.Column;
 import com.appiancorp.suiteapi.process.analytics2.ProcessAnalyticsService;
 import com.appiancorp.suiteapi.process.analytics2.ProcessReport;
 import com.appiancorp.suiteapi.process.analytics2.ReportData;
@@ -67,20 +74,21 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 	private String calculateUrl(HttpServletRequest request, HttpServletResponse response) throws IOException {
 		ServiceContext sc = WebServiceContextFactory.getServiceContext(request);
 		Long reportId = (Long)evaluateExpression(sc,"cons!HFT_GET_ALL_TASKS_LIST");
-
+		String user = request.getRemoteUser();
+		
 		try {
 			// Loop through various sorting filters 
 			
 			String[] accessTypes = calculateAccessTypes(
 					sc,
-					request.getRemoteUser(),
+					user,
 					new String[]{"cons!HFT_PRIVATE_ASSOCIATE_GROUP", "cons!HFT_ASSOCIATE_USERS_GROUP", "cons!HFT_REGULAR_USERS_GROUP"},
 					new String[]{"Private", "Associate", "Regular"}
 			);
 			String[] heloTypes = {"HELON", "HELOC"};
 			String[] statusTypes = calculateAccessTypes(
 					sc,
-					request.getRemoteUser(),
+					user,
 					new String[]{"cons!HFT_SUPERVISORS_GROUP", "cons!HFT_USERS"},
 					new String[]{"PENDING SUPERVISOR REVIEW", "NEW"}
 			);
@@ -92,7 +100,7 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 						
 						Long[] taskIds = getPortalReportDataSubset(sc, reportId, filters);
 						for(Long taskId:taskIds) {
-							if(assignTask(sc, taskId, request.getRemoteUser())) {
+							if(assignTask(sc, taskId, user)) {
 								return("/suite/tempo/tasks/task/" + String.valueOf(taskId));
 							}
 						}
@@ -134,12 +142,7 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 		Assignee[] currentAssignees = pes.getAssigneePoolForTasks(taskIds);
 
 		for(Assignee assignee:currentAssignees) {
-			// Currently considering any task assigned to a group available for reassignment
 			if(assignee.getType() != Assignment.ASSIGNEE_TYPE_GROUPS) {
-				/*Long currentAssignee = (Long)assignee.getValue();
-				Long groupId = (Long)evaluateExpression(sc, "group(cons!HFT_ALL_USERS, \"id\")");
-				if(currentAssignee.longValue() != groupId.longValue())
-					return false;*/
 				return false;
 			}
 		}
@@ -148,9 +151,7 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 		assignee.setValue(user);
 		assignee.setType(new Long(Assignment.ASSIGNEE_TYPE_USERS));
 		assignee.setPrivilege(Assignment.PRIVILEGE_REASSIGN_TO_ANY);
-
 		Assignee[] assignees = {assignee};
-
 		pes.reassignTask(taskId, assignees);
 
 		return true;
@@ -204,16 +205,14 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 
 		reportData.setStartIndex(0);
 		reportData.setBatchSize(25); 		// Can increase this if more than 25 people are clicking at the same time
-		reportData.setSortColumnLocalId(2); // Sorting by Column 3 (Received Date)
+		reportData.setSortColumnLocalId(16); // Sorting by Column 17 (Funding Date)
 		reportData.setSortOrder(Constants.SORT_ORDER_ASCENDING);
 
 		ReportResultPage rp = pas.getReportPageWithTypedValues(reportData);
 
 		return rp.getTaskIds();
-
-		/** For now not pulling back column data just task ids **/
 		
-	    /* PortalReport pReport = new PortalReport();
+	    /*PortalReport pReport = new PortalReport();
 		List<PortalReportColumn> columnList = new ArrayList<>();
 		List<PortalReportColumnData> dataList = new ArrayList<>();
 		List<Long> identifierList = new ArrayList<>();
@@ -260,8 +259,8 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 				identifierList,
 				pReport,
 				columnList
-				);
-	  */
+				);*/
+	  
 	}
 	
 	private PortalReportFilter[] createFilters(ServiceContext sc, String accessType, String heloType, String statusType) {
@@ -269,25 +268,25 @@ public class GetNextHFTTaskServlet extends HttpServlet {
 		// Create Access Type Filter
 		
 		String field = "10";
-		String compType = "IN";
+		String compType = "EQUAL";
 		Object value = accessType;
-		TypedValue tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
+		TypedValue tv = new TypedValue(new Long(AppianType.STRING), value);
 		PortalReportFilter accessTypeFilter = new PortalReportFilter(field, compType, tv);
 		
 		// Create HELO Type Filter
 		
-		field = "10"; // Figure out which column has this field ***********************************************
-		compType = "IN";
+		field = "11";
+		compType = "EQUAL";
 		value = heloType;
-		tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
+		tv = new TypedValue(new Long(AppianType.STRING), value);
 		PortalReportFilter heloTypeFilter = new PortalReportFilter(field, compType, tv);
 		
 		// Create Case Status Filter
 		
 		field = "14";
-		compType = "IN";
+		compType = "EQUAL";
 		value = statusType;
-		tv = new TypedValue(new Long(AppianType.LIST_OF_STRING), value);
+		tv = new TypedValue(new Long(AppianType.STRING), value);
 		PortalReportFilter caseStatusFilter = new PortalReportFilter(field, compType, tv);
 		
 		PortalReportFilter[] filters = {accessTypeFilter, heloTypeFilter, caseStatusFilter};
